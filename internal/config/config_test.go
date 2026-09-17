@@ -1,7 +1,10 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -74,5 +77,104 @@ func TestDatabaseConfigDSN(t *testing.T) {
 		if !strings.Contains(got, part) {
 			t.Fatalf("DSN() = %q, expected it to contain %q", got, part)
 		}
+	}
+}
+
+// clearDBEnv unsets all DB_* variables so LoadDatabaseConfig falls back to
+// values sourced from files (or built-in defaults) during the test.
+func clearDBEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{"DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE"} {
+		t.Setenv(key, "")
+		os.Unsetenv(key)
+	}
+}
+
+// withWorkingDir switches the process working directory to dir for the
+// duration of the test and restores it afterwards.
+func withWorkingDir(t *testing.T, dir string) {
+	t.Helper()
+	original, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("os.Chdir(%q) error = %v", dir, err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(original)
+	})
+}
+
+// resetLoadEnvFileOnce allows loadEnvFile to run again within the same test
+// binary, since it is normally guarded to run only once per process.
+func resetLoadEnvFileOnce(t *testing.T) {
+	t.Helper()
+	original := loadEnvFileOnce
+	loadEnvFileOnce = &sync.Once{}
+	t.Cleanup(func() {
+		loadEnvFileOnce = original
+	})
+}
+
+func TestLoadDatabaseConfigReadsDotEnvFile(t *testing.T) {
+	clearDBEnv(t)
+	resetLoadEnvFileOnce(t)
+	withWorkingDir(t, t.TempDir())
+
+	writeEnvFile(t, ".env", "DB_NAME=from_dot_env\nDB_HOST=env-file-host\n")
+
+	cfg := LoadDatabaseConfig()
+
+	if cfg.Name != "from_dot_env" {
+		t.Errorf("cfg.Name = %q, want %q", cfg.Name, "from_dot_env")
+	}
+	if cfg.Host != "env-file-host" {
+		t.Errorf("cfg.Host = %q, want %q", cfg.Host, "env-file-host")
+	}
+	// Values not present in the file should still fall back to defaults.
+	if cfg.Port != "5432" {
+		t.Errorf("cfg.Port = %q, want %q", cfg.Port, "5432")
+	}
+}
+
+func TestLoadDatabaseConfigDotEnvLocalOverridesDotEnv(t *testing.T) {
+	clearDBEnv(t)
+	resetLoadEnvFileOnce(t)
+	withWorkingDir(t, t.TempDir())
+
+	writeEnvFile(t, ".env", "DB_NAME=from_dot_env\nDB_HOST=env-file-host\n")
+	writeEnvFile(t, ".env.local", "DB_NAME=from_dot_env_local\n")
+
+	cfg := LoadDatabaseConfig()
+
+	if cfg.Name != "from_dot_env_local" {
+		t.Errorf("cfg.Name = %q, want %q", cfg.Name, "from_dot_env_local")
+	}
+	// Values only present in .env should be unaffected by .env.local.
+	if cfg.Host != "env-file-host" {
+		t.Errorf("cfg.Host = %q, want %q", cfg.Host, "env-file-host")
+	}
+}
+
+func TestLoadDatabaseConfigRealEnvVarOverridesFiles(t *testing.T) {
+	resetLoadEnvFileOnce(t)
+	withWorkingDir(t, t.TempDir())
+
+	writeEnvFile(t, ".env", "DB_NAME=from_dot_env\n")
+	writeEnvFile(t, ".env.local", "DB_NAME=from_dot_env_local\n")
+	t.Setenv("DB_NAME", "from_real_env")
+
+	cfg := LoadDatabaseConfig()
+
+	if cfg.Name != "from_real_env" {
+		t.Errorf("cfg.Name = %q, want %q", cfg.Name, "from_real_env")
+	}
+}
+
+func writeEnvFile(t *testing.T, name, contents string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(".", name), []byte(contents), 0o600); err != nil {
+		t.Fatalf("writing %s: %v", name, err)
 	}
 }

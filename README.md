@@ -15,7 +15,7 @@ schema and the tooling used to apply it.
 
 ```
 cmd/migrate/          CLI entrypoint that applies or rolls back migrations
-internal/config/       Loads database connection settings from environment variables
+internal/config/       Loads database connection settings from environment variables (or a .env file)
 internal/db/           Migration runner built on golang-migrate (Migrate / Rollback)
 db/migrations/         Versioned SQL migration files (one table per file, up/down pairs)
 ```
@@ -50,10 +50,16 @@ same SQL file, following a one-table-per-file convention. Every table also
 carries the standard audit/soft-delete columns: `created_at`, `updated_at`,
 `deleted_at`, `created_by`, `updated_by`, and `deleted`.
 
-## Running Migrations
+## Configuration
 
 Connection settings are read from environment variables (see
-`internal/config/config.go` for defaults):
+`internal/config/config.go` for defaults). A root-level [`.env`](./.env) file
+with these defaults is loaded automatically on startup via
+[godotenv](https://github.com/joho/godotenv); real environment variables
+always take precedence over the values in `.env`, so it is safe to override
+any of them (e.g. in CI or production) without editing the file. For local,
+untracked overrides, copy values into a `.env.local` file, which is ignored
+by git.
 
 | Variable | Default |
 | --- | --- |
@@ -63,6 +69,8 @@ Connection settings are read from environment variables (see
 | `DB_PASSWORD` | `postgres` |
 | `DB_NAME` | `ai_sdlc` |
 | `DB_SSLMODE` | `disable` |
+
+## Running Migrations
 
 Apply all pending migrations:
 
