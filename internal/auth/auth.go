@@ -74,16 +74,22 @@ var ErrMissingToken = errors.New("auth: missing or malformed bearer token")
 
 // Parse validates the given raw JWT and returns the authenticated user.
 func (v *Verifier) Parse(rawToken string) (User, error) {
+	opts := []jwt.ParserOption{jwt.WithValidMethods([]string{"RS256"})}
+	if v.issuer != "" {
+		opts = append(opts, jwt.WithIssuer(v.issuer))
+	}
+	if v.audience != "" {
+		// jwt.WithAudience requires the "aud" claim to be present, so it must
+		// only be applied when an audience is actually configured.
+		opts = append(opts, jwt.WithAudience(v.audience))
+	}
+
 	parsed, err := jwt.ParseWithClaims(rawToken, &claims{}, func(t *jwt.Token) (interface{}, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodRSA); !ok {
 			return nil, jwt.ErrTokenSignatureInvalid
 		}
 		return v.publicKey, nil
-	},
-		jwt.WithIssuer(v.issuer),
-		jwt.WithAudience(v.audience),
-		jwt.WithValidMethods([]string{"RS256"}),
-	)
+	}, opts...)
 	if err != nil {
 		return User{}, err
 	}

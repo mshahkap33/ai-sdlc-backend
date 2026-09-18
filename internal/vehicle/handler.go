@@ -3,6 +3,7 @@ package vehicle
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 
 	"github.com/mshahkap33/ai-sdlc-backend/internal/auth"
@@ -65,6 +66,7 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrCategoryNotFound):
 		writeError(w, http.StatusUnprocessableEntity, ErrCategoryNotFound.Error(), nil)
 	default:
+		log.Printf("vehicle: unexpected error creating vehicle: %v", err)
 		writeError(w, http.StatusInternalServerError, "internal server error", nil)
 	}
 }
