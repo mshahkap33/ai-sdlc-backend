@@ -12,6 +12,7 @@ import (
 
 	"github.com/mshahkap33/ai-sdlc-backend/internal/auth"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/config"
+	"github.com/mshahkap33/ai-sdlc-backend/internal/maintenanceschedule"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/vehicle"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/vehiclestatus"
 )
@@ -57,6 +58,10 @@ func main() {
 	statusService := vehiclestatus.NewService(statusRepo)
 	statusHandler := vehiclestatus.NewHandler(statusService)
 
+	scheduleRepo := maintenanceschedule.NewPostgresRepository(pool)
+	scheduleService := maintenanceschedule.NewService(scheduleRepo)
+	scheduleHandler := maintenanceschedule.NewHandler(scheduleService)
+
 	// vehiclestatus.Handler registers its routes on its own mux so that the
 	// status-events and status (override) endpoints can be wrapped with
 	// different role requirements below.
@@ -76,6 +81,10 @@ func main() {
 	))
 	mux.Handle("PATCH /api/v1/vehicles/{vehicleId}/status", verifier.Authenticate(
 		auth.RequireAnyRole([]string{roleServiceStaff, roleOperationsManager}, statusRoutes),
+	))
+
+	mux.Handle("POST /api/v1/maintenance-schedules", verifier.Authenticate(
+		auth.RequireAnyRole([]string{roleServiceStaff, roleOperationsManager}, http.HandlerFunc(scheduleHandler.CreateSchedule)),
 	))
 
 	addr := getEnv("HTTP_ADDR", ":8080")
