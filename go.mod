@@ -3,6 +3,7 @@ module github.com/mshahkap33/ai-sdlc-backend
 go 1.25.0
 
 require (
+	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/golang-migrate/migrate/v4 v4.18.3
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/joho/godotenv v1.5.1

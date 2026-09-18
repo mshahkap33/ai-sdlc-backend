@@ -1,8 +1,9 @@
 # ai-sdlc-backend
 
 Backend source code for the car management system, implemented in Go with a
-PostgreSQL database. This repository currently contains the initial database
-schema and the tooling used to apply it.
+PostgreSQL database. This repository contains the database schema, the
+tooling used to apply it, and the REST API implementing the car management
+capabilities.
 
 ## Technology Stack
 
@@ -14,10 +15,14 @@ schema and the tooling used to apply it.
 ## Repository Layout
 
 ```
-cmd/migrate/          CLI entrypoint that applies or rolls back migrations
-internal/config/       Loads database connection settings from environment variables (or a .env file)
+cmd/migrate/           CLI entrypoint that applies or rolls back migrations
+cmd/server/            HTTP server entrypoint exposing the REST API
+internal/auth/         JWT bearer-token authentication and role authorization middleware
+internal/config/       Loads database/auth/server settings from environment variables (or a .env file)
 internal/db/           Migration runner built on golang-migrate (Migrate / Rollback)
+internal/vehicle/      Vehicle Onboarding domain logic, repository, and HTTP handlers
 db/migrations/         Versioned SQL migration files (one table per file, up/down pairs)
+docs/exaples/          Sample API usage (e.g. curl requests)
 ```
 
 ## Database Schema
@@ -70,6 +75,16 @@ by git.
 | `DB_NAME` | `ai_sdlc` |
 | `DB_SSLMODE` | `disable` |
 
+The API server additionally reads the following variables:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SERVER_ADDR` | `:8080` | address the HTTP server listens on |
+| `AUTH_JWT_PUBLIC_KEY` | _(none)_ | PEM-encoded RSA public key (or certificate) used to verify bearer JWTs; required |
+| `AUTH_JWT_PUBLIC_KEY_PATH` | _(none)_ | path to a file containing the PEM key, used when `AUTH_JWT_PUBLIC_KEY` is not set |
+| `AUTH_JWT_ISSUER` | _(none)_ | when set, the required JWT `iss` claim |
+| `AUTH_JWT_AUDIENCE` | _(none)_ | when set, the required JWT `aud` claim |
+
 ## Running Migrations
 
 Apply all pending migrations:
@@ -87,6 +102,18 @@ go run ./cmd/migrate -direction down -steps 1
 By default the CLI reads migration files from `db/migrations`; override the
 location with `-path` if needed.
 
+## Running the API Server
+
+```sh
+go run ./cmd/server
+```
+
+The server exposes the Vehicle Onboarding REST API. All endpoints require an
+RS256-signed JWT bearer token (see `AUTH_JWT_PUBLIC_KEY` above); creating a
+vehicle additionally requires the `service_staff` role. See
+[`docs/exaples/create-vehicle.md`](./docs/exaples/create-vehicle.md) for a
+worked example, including a sample `curl` request.
+
 ## Testing
 
 ```sh
@@ -94,9 +121,10 @@ go test ./...
 ```
 
 The migration tests in `internal/db` apply and roll back the full schema
-against a real PostgreSQL instance. They are skipped automatically unless the
+against a real PostgreSQL instance. The repository integration tests in
+`internal/vehicle` do the same. Both are skipped automatically unless the
 `TEST_DATABASE_DSN` environment variable is set, e.g.:
 
 ```sh
-TEST_DATABASE_DSN="host=localhost port=5432 user=postgres dbname=ai_sdlc sslmode=disable" go test ./internal/db/...
+TEST_DATABASE_DSN="host=localhost port=5432 user=postgres dbname=ai_sdlc sslmode=disable" go test ./internal/db/... ./internal/vehicle/...
 ```

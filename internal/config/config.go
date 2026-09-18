@@ -100,3 +100,55 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+// AuthConfig holds the settings required to validate the bearer JWTs
+// presented to the REST API, per the Vehicle Onboarding TRD security
+// requirement.
+type AuthConfig struct {
+	// JWTPublicKeyPEM is the PEM-encoded RSA public key (or certificate)
+	// used to verify the identity provider's JWT signatures.
+	JWTPublicKeyPEM string
+	// JWTIssuer, when non-empty, is the required JWT "iss" claim value.
+	JWTIssuer string
+	// JWTAudience, when non-empty, is the required JWT "aud" claim value.
+	JWTAudience string
+}
+
+// LoadAuthConfig reads JWT verification settings from environment
+// variables: AUTH_JWT_PUBLIC_KEY (or AUTH_JWT_PUBLIC_KEY_PATH to read the
+// PEM contents from a file), AUTH_JWT_ISSUER, and AUTH_JWT_AUDIENCE.
+func LoadAuthConfig() (AuthConfig, error) {
+	loadEnvFile()
+
+	pem := os.Getenv("AUTH_JWT_PUBLIC_KEY")
+	if pem == "" {
+		if path := os.Getenv("AUTH_JWT_PUBLIC_KEY_PATH"); path != "" {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return AuthConfig{}, err
+			}
+			pem = string(data)
+		}
+	}
+
+	return AuthConfig{
+		JWTPublicKeyPEM: pem,
+		JWTIssuer:       os.Getenv("AUTH_JWT_ISSUER"),
+		JWTAudience:     os.Getenv("AUTH_JWT_AUDIENCE"),
+	}, nil
+}
+
+// ServerConfig holds settings for the HTTP server entrypoint.
+type ServerConfig struct {
+	Addr string
+}
+
+// LoadServerConfig reads HTTP server settings from environment variables,
+// applying sensible defaults when a variable is not set.
+func LoadServerConfig() ServerConfig {
+	loadEnvFile()
+
+	return ServerConfig{
+		Addr: getEnv("SERVER_ADDR", ":8080"),
+	}
+}
