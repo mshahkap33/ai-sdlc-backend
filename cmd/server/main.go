@@ -13,11 +13,17 @@ import (
 	"github.com/mshahkap33/ai-sdlc-backend/internal/auth"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/config"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/vehicle"
+	"github.com/mshahkap33/ai-sdlc-backend/internal/vehiclestatus"
 )
 
-// serviceStaffRole is the role required to create or update vehicle master
-// data, as required by the Vehicle Onboarding TRD's security requirements.
-const serviceStaffRole = "service_staff"
+// Role names recognized by the JWT `roles` claim, per the Vehicle
+// Onboarding and Vehicle Status and Availability TRDs' security
+// requirements.
+const (
+	roleServiceStaff      = "service_staff"
+	roleOperationsManager = "operations_manager"
+	roleSystemService     = "system_service"
+)
 
 func main() {
 	dbCfg := config.LoadDatabaseConfig()
@@ -47,9 +53,29 @@ func main() {
 	vehicleService := vehicle.NewService(vehicleRepo)
 	vehicleHandler := vehicle.NewHandler(vehicleService)
 
+	statusRepo := vehiclestatus.NewPostgresRepository(pool)
+	statusService := vehiclestatus.NewService(statusRepo)
+	statusHandler := vehiclestatus.NewHandler(statusService)
+
+	// vehiclestatus.Handler registers its routes on its own mux so that the
+	// status-events and status (override) endpoints can be wrapped with
+	// different role requirements below.
+	statusRoutes := http.NewServeMux()
+	statusHandler.Register(statusRoutes)
+
 	mux := http.NewServeMux()
 	mux.Handle("POST /api/v1/vehicles", verifier.Authenticate(
-		auth.RequireRole(serviceStaffRole, http.HandlerFunc(vehicleHandler.CreateVehicle)),
+		auth.RequireRole(roleServiceStaff, http.HandlerFunc(vehicleHandler.CreateVehicle)),
+	))
+
+	// status-events is a system-driven transition restricted to trusted
+	// internal service accounts; status (manual override) requires service
+	// staff or operations manager privileges.
+	mux.Handle("POST /api/v1/vehicles/{vehicleId}/status-events", verifier.Authenticate(
+		auth.RequireRole(roleSystemService, statusRoutes),
+	))
+	mux.Handle("PATCH /api/v1/vehicles/{vehicleId}/status", verifier.Authenticate(
+		auth.RequireAnyRole([]string{roleServiceStaff, roleOperationsManager}, statusRoutes),
 	))
 
 	addr := getEnv("HTTP_ADDR", ":8080")

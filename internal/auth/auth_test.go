@@ -145,3 +145,65 @@ func TestRequireRoleForbidden(t *testing.T) {
 		t.Error("expected handler not to be called")
 	}
 }
+
+func TestRequireAnyRoleAllowsMatchingRole(t *testing.T) {
+	key := generateKeyPair(t)
+	v := NewVerifier(&key.PublicKey, "issuer", "audience")
+
+	c := claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "user-1",
+			Issuer:    "issuer",
+			Audience:  jwt.ClaimStrings{"audience"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+		Roles: []string{"operations_manager"},
+	}
+	token := signToken(t, key, c)
+
+	called := false
+	handler := v.Authenticate(RequireAnyRole([]string{"service_staff", "operations_manager"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})))
+
+	req := httptest.NewRequest(http.MethodPatch, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !called {
+		t.Error("expected handler to be called")
+	}
+}
+
+func TestRequireAnyRoleForbidden(t *testing.T) {
+	key := generateKeyPair(t)
+	v := NewVerifier(&key.PublicKey, "issuer", "audience")
+
+	c := claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   "user-1",
+			Issuer:    "issuer",
+			Audience:  jwt.ClaimStrings{"audience"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+		},
+		Roles: []string{"customer"},
+	}
+	token := signToken(t, key, c)
+
+	handler := v.Authenticate(RequireAnyRole([]string{"service_staff", "operations_manager"}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("handler should not be called")
+	})))
+
+	req := httptest.NewRequest(http.MethodPatch, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+}

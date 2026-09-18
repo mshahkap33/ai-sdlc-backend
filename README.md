@@ -1,8 +1,9 @@
 # ai-sdlc-backend
 
 Backend source code for the car management system, implemented in Go with a
-PostgreSQL database. This repository currently contains the initial database
-schema, the tooling used to apply it, and the Vehicle Onboarding REST API.
+PostgreSQL database. This repository contains the database schema, the
+tooling used to apply it, and REST APIs for Vehicle Onboarding and for
+transitioning a vehicle's lifecycle status.
 
 ## Technology Stack
 
@@ -10,19 +11,20 @@ schema, the tooling used to apply it, and the Vehicle Onboarding REST API.
 - **Database:** PostgreSQL
 - **Migrations:** [golang-migrate](https://github.com/golang-migrate/migrate) with the `pgx/v5` driver
 - **API style:** REST (no ORM)
+- **Authentication:** JWT bearer tokens (RS256), validated per the [technical requirement documents](https://github.com/mshahkap33/ai-sdlc/tree/main/docs/trd)
 
 ## Repository Layout
 
 ```
-cmd/migrate/          CLI entrypoint that applies or rolls back migrations
-cmd/server/            CLI entrypoint that starts the REST API HTTP server
-internal/config/       Loads database/auth connection settings from environment variables (or a .env file)
-internal/db/           Migration runner built on golang-migrate (Migrate / Rollback)
-internal/auth/         JWT bearer-token authentication and role-based authorization middleware
-internal/vehicle/      Vehicle Onboarding REST API (model, validation, repository, service, handler)
-db/migrations/         Versioned SQL migration files (one table per file, up/down pairs)
-docs/examples/         Sample API usage (e.g. curl requests)
-```
+cmd/migrate/             CLI entrypoint that applies or rolls back migrations
+cmd/server/              CLI entrypoint that starts the REST API HTTP server
+internal/auth/           JWT bearer-token authentication and role-based authorization middleware
+internal/config/         Loads database/auth connection settings from environment variables (or a .env file)
+internal/db/             Migration runner built on golang-migrate (Migrate / Rollback)
+internal/vehicle/        Vehicle Onboarding REST API (model, validation, repository, service, handler)
+internal/vehiclestatus/  Vehicle lifecycle status state machine, service, repository, and HTTP handlers
+db/migrations/           Versioned SQL migration files (one table per file, up/down pairs)
+docs/examples/           Sample API usage (e.g. curl requests)
 ```
 
 ## Database Schema
@@ -105,12 +107,26 @@ location with `-path` if needed.
 
 ## Running the REST API Server
 
+Requires `AUTH_JWT_PUBLIC_KEY` (or `AUTH_JWT_PUBLIC_KEY_PATH`) to be set so
+incoming bearer tokens can be verified:
+
 ```sh
 go run ./cmd/server
 ```
 
-See [`docs/examples`](./docs/examples) for sample API requests, e.g.
-[Create Vehicle](./docs/examples/create-vehicle.md).
+This exposes the Vehicle Onboarding endpoints and the vehicle lifecycle
+status transition endpoints defined in the [Vehicle Status and Availability TRD](https://github.com/mshahkap33/ai-sdlc/blob/main/docs/trd/trd-vehicle-status-availability.md):
+
+| Endpoint | Description | Required role |
+| --- | --- | --- |
+| `POST /api/v1/vehicles/{vehicleId}/status-events` | Submit a triggering event (e.g. `booking_confirmed`) that automatically transitions the vehicle's status | `system_service` |
+| `PATCH /api/v1/vehicles/{vehicleId}/status` | Manually override a vehicle's status with a mandatory reason | `service_staff` or `operations_manager` |
+
+Every request must include a JWT in the `Authorization` header whose
+`roles` claim contains one of the required roles above. See
+[`docs/examples`](./docs/examples) for sample API requests, e.g.
+[Create Vehicle](./docs/examples/create-vehicle.md) and
+[Transition Vehicle Lifecycle Status](./docs/examples/transition-vehicle-lifecycle-status.md).
 
 ## Testing
 

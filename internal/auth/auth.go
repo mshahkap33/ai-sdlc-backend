@@ -143,12 +143,28 @@ func bearerToken(r *http.Request) (string, error) {
 // by Authenticate) has the given role, responding with 403 Forbidden
 // otherwise. It must be applied after Authenticate.
 func RequireRole(role string, next http.Handler) http.Handler {
+	return RequireAnyRole([]string{role}, next)
+}
+
+// RequireAnyRole returns middleware that ensures the authenticated user (set
+// by Authenticate) has at least one of the given roles, responding with 403
+// Forbidden otherwise. It must be applied after Authenticate.
+func RequireAnyRole(roles []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := UserFromContext(r.Context())
-		if !ok || !user.HasRole(role) {
-			http.Error(w, "forbidden: requires role "+role, http.StatusForbidden)
+		if !ok || !hasAnyRole(user, roles) {
+			http.Error(w, "forbidden: requires one of roles "+strings.Join(roles, ", "), http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func hasAnyRole(user User, roles []string) bool {
+	for _, role := range roles {
+		if user.HasRole(role) {
+			return true
+		}
+	}
+	return false
 }
