@@ -4,6 +4,11 @@
 package config
 
 import (
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"sync"
@@ -99,4 +104,71 @@ func getEnv(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+// AuthConfig holds the settings required to verify JWT bearer tokens
+// presented to the REST API.
+type AuthConfig struct {
+	// PublicKeyPEM is the PEM-encoded RSA public key used to verify RS256
+	// token signatures.
+	PublicKeyPEM string
+	Issuer       string
+	Audience     string
+}
+
+// LoadAuthConfig reads JWT verification settings from environment
+// variables (populated from a .env file when present):
+//
+//   - AUTH_JWT_PUBLIC_KEY: PEM-encoded RSA public key content.
+//   - AUTH_JWT_PUBLIC_KEY_PATH: path to a file containing the PEM-encoded
+//     RSA public key, used when AUTH_JWT_PUBLIC_KEY is not set.
+//   - AUTH_JWT_ISSUER: expected token issuer.
+//   - AUTH_JWT_AUDIENCE: expected token audience.
+func LoadAuthConfig() (AuthConfig, error) {
+	loadEnvFile()
+
+	cfg := AuthConfig{
+		PublicKeyPEM: os.Getenv("AUTH_JWT_PUBLIC_KEY"),
+		Issuer:       os.Getenv("AUTH_JWT_ISSUER"),
+		Audience:     os.Getenv("AUTH_JWT_AUDIENCE"),
+	}
+
+	if cfg.PublicKeyPEM == "" {
+		if path := os.Getenv("AUTH_JWT_PUBLIC_KEY_PATH"); path != "" {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return AuthConfig{}, fmt.Errorf("reading AUTH_JWT_PUBLIC_KEY_PATH: %w", err)
+			}
+			cfg.PublicKeyPEM = string(data)
+		}
+	}
+
+	return cfg, nil
+}
+
+// PublicKey parses the configured PEM-encoded RSA public key.
+func (c AuthConfig) PublicKey() (*rsa.PublicKey, error) {
+	block, _ := pem.Decode([]byte(c.PublicKeyPEM))
+	if block == nil {
+		return nil, errors.New("config: no PEM block found in AUTH_JWT_PUBLIC_KEY")
+	}
+
+	if pub, err := x509.ParsePKIXPublicKey(block.Bytes); err == nil {
+		rsaKey, ok := pub.(*rsa.PublicKey)
+		if !ok {
+			return nil, errors.New("config: AUTH_JWT_PUBLIC_KEY is not an RSA public key")
+		}
+		return rsaKey, nil
+	}
+
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err == nil {
+		rsaKey, ok := cert.PublicKey.(*rsa.PublicKey)
+		if !ok {
+			return nil, errors.New("config: AUTH_JWT_PUBLIC_KEY certificate does not contain an RSA public key")
+		}
+		return rsaKey, nil
+	}
+
+	return nil, fmt.Errorf("config: failed to parse AUTH_JWT_PUBLIC_KEY: %w", err)
 }
