@@ -1,21 +1,24 @@
-// Command server runs the REST API for the car management service,
-// currently exposing the vehicle lifecycle status transition endpoints.
+// Command server starts the car management REST API HTTP server.
 package main
 
 import (
-	"database/sql"
+	"context"
 	"log"
 	"net/http"
+	"os"
+	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mshahkap33/ai-sdlc-backend/internal/auth"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/config"
+	"github.com/mshahkap33/ai-sdlc-backend/internal/vehicle"
 	"github.com/mshahkap33/ai-sdlc-backend/internal/vehiclestatus"
 )
 
-// Role names recognized by the JWT `roles` claim, per the vehicle status
-// and availability TRD's security requirements.
+// Role names recognized by the JWT `roles` claim, per the Vehicle
+// Onboarding and Vehicle Status and Availability TRDs' security
+// requirements.
 const (
 	roleServiceStaff      = "service_staff"
 	roleOperationsManager = "operations_manager"
@@ -24,38 +27,67 @@ const (
 
 func main() {
 	dbCfg := config.LoadDatabaseConfig()
-	serverCfg := config.LoadServerConfig()
 
-	if serverCfg.JWTSecret == "" {
-		log.Fatal("JWT_SECRET must be set to run the server")
-	}
-
-	db, err := sql.Open("pgx", dbCfg.DSN())
+	authCfg, err := config.LoadAuthConfig()
 	if err != nil {
-		log.Fatalf("opening database connection: %v", err)
+		log.Fatalf("loading auth config: %v", err)
 	}
-	defer db.Close()
 
-	verifier := auth.NewVerifier([]byte(serverCfg.JWTSecret))
-	repo := vehiclestatus.NewPostgresRepository(db)
-	service := vehiclestatus.NewService(repo)
-	handler := vehiclestatus.NewHandler(service)
+	publicKey, err := authCfg.PublicKey()
+	if err != nil {
+		log.Fatalf("loading JWT public key: %v", err)
+	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, dbCfg.DSN())
+	if err != nil {
+		log.Fatalf("connecting to database: %v", err)
+	}
+	defer pool.Close()
+
+	verifier := auth.NewVerifier(publicKey, authCfg.Issuer, authCfg.Audience)
+
+	vehicleRepo := vehicle.NewPostgresRepository(pool)
+	vehicleService := vehicle.NewService(vehicleRepo)
+	vehicleHandler := vehicle.NewHandler(vehicleService)
+
+	statusRepo := vehiclestatus.NewPostgresRepository(pool)
+	statusService := vehiclestatus.NewService(statusRepo)
+	statusHandler := vehiclestatus.NewHandler(statusService)
+
+	// vehiclestatus.Handler registers its routes on its own mux so that the
+	// status-events and status (override) endpoints can be wrapped with
+	// different role requirements below.
 	statusRoutes := http.NewServeMux()
-	handler.Register(statusRoutes)
+	statusHandler.Register(statusRoutes)
 
 	mux := http.NewServeMux()
+	mux.Handle("POST /api/v1/vehicles", verifier.Authenticate(
+		auth.RequireRole(roleServiceStaff, http.HandlerFunc(vehicleHandler.CreateVehicle)),
+	))
 
-	// POST /status-events is restricted to trusted internal service
-	// accounts; PATCH /status (manual override) requires service staff or
-	// operations manager privileges.
-	mux.Handle("POST /api/v1/vehicles/{vehicleId}/status-events",
-		verifier.RequireRoles(roleSystemService)(statusRoutes))
-	mux.Handle("PATCH /api/v1/vehicles/{vehicleId}/status",
-		verifier.RequireRoles(roleServiceStaff, roleOperationsManager)(statusRoutes))
+	// status-events is a system-driven transition restricted to trusted
+	// internal service accounts; status (manual override) requires service
+	// staff or operations manager privileges.
+	mux.Handle("POST /api/v1/vehicles/{vehicleId}/status-events", verifier.Authenticate(
+		auth.RequireRole(roleSystemService, statusRoutes),
+	))
+	mux.Handle("PATCH /api/v1/vehicles/{vehicleId}/status", verifier.Authenticate(
+		auth.RequireAnyRole([]string{roleServiceStaff, roleOperationsManager}, statusRoutes),
+	))
 
-	log.Printf("listening on %s", serverCfg.Addr)
-	if err := http.ListenAndServe(serverCfg.Addr, mux); err != nil {
+	addr := getEnv("HTTP_ADDR", ":8080")
+	log.Printf("listening on %s", addr)
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func getEnv(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok && value != "" {
+		return value
+	}
+	return fallback
 }

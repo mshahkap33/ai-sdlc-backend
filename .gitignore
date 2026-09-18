@@ -28,6 +28,9 @@ go.work.sum
 # non-secret defaults and should stay in the repo)
 .env.local
 
+# local dev-only JWT signing keys (never commit private keys)
+.devkeys/
+
 # Editor/IDE
 # .idea/
 # .vscode/

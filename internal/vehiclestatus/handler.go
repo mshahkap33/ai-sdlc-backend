@@ -69,8 +69,8 @@ func (h *Handler) handleStatusEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actor := ""
-	if claims, ok := auth.ClaimsFromContext(r.Context()); ok {
-		actor = claims.Subject
+	if user, ok := auth.UserFromContext(r.Context()); ok {
+		actor = user.Subject
 	}
 
 	result, err := h.service.ApplyEvent(r.Context(), ApplyEventInput{
@@ -115,8 +115,8 @@ func (h *Handler) handleStatusOverride(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actor := ""
-	if claims, ok := auth.ClaimsFromContext(r.Context()); ok {
-		actor = claims.Subject
+	if user, ok := auth.UserFromContext(r.Context()); ok {
+		actor = user.Subject
 	}
 
 	result, err := h.service.Override(r.Context(), OverrideInput{

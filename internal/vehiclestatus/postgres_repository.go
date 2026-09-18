@@ -2,23 +2,26 @@ package vehiclestatus
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// PostgresRepository is a database/sql-backed implementation of Repository
-// for PostgreSQL, using the tables defined by the vehicle status and
+// PostgresRepository is a pgx-backed implementation of Repository for
+// PostgreSQL, using the tables defined by the vehicle status and
 // availability migrations (vehicles, vehicle_status_triggers,
 // vehicle_status_history).
 type PostgresRepository struct {
-	db *sql.DB
+	pool *pgxpool.Pool
 }
 
-// NewPostgresRepository wraps an existing *sql.DB connection pool.
-func NewPostgresRepository(db *sql.DB) *PostgresRepository {
-	return &PostgresRepository{db: db}
+// NewPostgresRepository creates a PostgresRepository that executes queries
+// against pool.
+func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{pool: pool}
 }
 
 // GetVehicleStatus implements Repository.
@@ -30,8 +33,8 @@ func (r *PostgresRepository) GetVehicleStatus(ctx context.Context, vehicleID str
 	`
 
 	var vs VehicleStatus
-	err := r.db.QueryRowContext(ctx, query, vehicleID).Scan(&vs.VehicleID, &vs.CategoryID, &vs.Status, &vs.StatusSince)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := r.pool.QueryRow(ctx, query, vehicleID).Scan(&vs.VehicleID, &vs.CategoryID, &vs.Status, &vs.StatusSince)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return VehicleStatus{}, ErrVehicleNotFound
 	}
 	if err != nil {
@@ -50,8 +53,8 @@ func (r *PostgresRepository) GetTrigger(ctx context.Context, eventType EventType
 	`
 
 	var t Trigger
-	err := r.db.QueryRowContext(ctx, query, string(eventType)).Scan(&t.EventType, &t.ResultingStatus, &t.RequiresReason)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := r.pool.QueryRow(ctx, query, string(eventType)).Scan(&t.EventType, &t.ResultingStatus, &t.RequiresReason)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return Trigger{}, ErrUnknownEventType
 	}
 	if err != nil {
@@ -64,24 +67,22 @@ func (r *PostgresRepository) GetTrigger(ctx context.Context, eventType EventType
 // ApplyTransition implements Repository. It updates the vehicle's status and
 // appends the audit trail entry within a single database transaction.
 func (r *PostgresRepository) ApplyTransition(ctx context.Context, vehicleID string, newStatus Status, statusSince time.Time, entry HistoryEntry) error {
-	tx, err := r.db.BeginTx(ctx, nil)
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	const updateVehicle = `
 		UPDATE vehicles
 		SET status = $1, status_since = $2, updated_at = now(), updated_by = $3
 		WHERE id = $4 AND deleted = false
 	`
-	res, err := tx.ExecContext(ctx, updateVehicle, string(newStatus), statusSince, entry.Actor, vehicleID)
+	tag, err := tx.Exec(ctx, updateVehicle, string(newStatus), statusSince, entry.Actor, vehicleID)
 	if err != nil {
 		return fmt.Errorf("updating vehicle status: %w", err)
 	}
-	if rows, err := res.RowsAffected(); err != nil {
-		return fmt.Errorf("checking updated rows: %w", err)
-	} else if rows == 0 {
+	if tag.RowsAffected() == 0 {
 		return ErrVehicleNotFound
 	}
 
@@ -98,13 +99,13 @@ func (r *PostgresRepository) ApplyTransition(ctx context.Context, vehicleID stri
 	if entry.Reason != "" {
 		reason = entry.Reason
 	}
-	if _, err := tx.ExecContext(ctx, insertHistory,
+	if _, err := tx.Exec(ctx, insertHistory,
 		vehicleID, previous, string(entry.NewStatus), entry.TriggerEvent, reason, entry.EffectiveAt, entry.Actor,
 	); err != nil {
 		return fmt.Errorf("inserting status history: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
+	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 

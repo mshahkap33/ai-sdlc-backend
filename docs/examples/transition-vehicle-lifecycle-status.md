@@ -8,9 +8,10 @@ The vehicle status state machine allows the following statuses:
 `available`, `reserved`, `rented`, `cleaning`, `maintenance`, `damaged`,
 `retired`.
 
-Both endpoints below require a JWT in the `Authorization` header, using the
-standard `<scheme> <token>` format. The token's `roles` claim must contain a
-role permitted for the endpoint being called (see
+Both endpoints below require a JWT access token, signed with RS256,
+presented via the standard OAuth2 bearer-token scheme in the `Authorization`
+request header (`Authorization: <scheme> <token>`). The token's `roles`
+claim must contain a role permitted for the endpoint being called (see
 [Authentication](#authentication)).
 
 ## Running the server
@@ -19,18 +20,9 @@ role permitted for the endpoint being called (see
 go run ./cmd/server
 ```
 
-The server reads `SERVER_ADDR` (default `:8080`) and `JWT_SECRET` from the
-environment (or `.env`/`.env.local`); see the root [README](../../README.md)
-for details.
-
-## Setting up a token for the examples below
-
-```sh
-# The auth scheme used by this API's Authorization header.
-AUTH_SCHEME="Bearer"
-# A JWT signed with the server's JWT_SECRET, containing a "roles" claim.
-JWT_TOKEN="<a signed JWT with the required role(s)>"
-```
+The server reads `HTTP_ADDR` (default `:8080`) plus the `AUTH_JWT_*`
+settings from the environment (or `.env`/`.env.local`); see the root
+[README](../../README.md) for details.
 
 ## 1. Submit a triggering event (system-to-system transition)
 
@@ -41,7 +33,7 @@ callers whose JWT `roles` claim includes `system_service`.
 
 ```sh
 curl -X POST "http://localhost:8080/api/v1/vehicles/11111111-1111-1111-1111-111111111111/status-events" \
-  -H "Authorization: $AUTH_SCHEME $JWT_TOKEN" \
+  -H "Authorization: <scheme> <token>" \
   -H "Content-Type: application/json" \
   -d '{
         "eventType": "booking_confirmed",
@@ -66,7 +58,7 @@ If the event's target status requires a reason (as configured in
 
 ```sh
 curl -X POST "http://localhost:8080/api/v1/vehicles/11111111-1111-1111-1111-111111111111/status-events" \
-  -H "Authorization: $AUTH_SCHEME $JWT_TOKEN" \
+  -H "Authorization: <scheme> <token>" \
   -H "Content-Type: application/json" \
   -d '{
         "eventType": "damage_reported",
@@ -92,7 +84,7 @@ directly, with a mandatory reason. This endpoint requires the caller's JWT
 
 ```sh
 curl -X PATCH "http://localhost:8080/api/v1/vehicles/11111111-1111-1111-1111-111111111111/status" \
-  -H "Authorization: $AUTH_SCHEME $JWT_TOKEN" \
+  -H "Authorization: <scheme> <token>" \
   -H "Content-Type: application/json" \
   -d '{
         "newStatus": "maintenance",
@@ -115,17 +107,17 @@ Successful response (`200 OK`):
 | Status | Cause |
 | --- | --- |
 | `400 Bad Request` | Malformed `vehicleId`/request body, unknown `eventType`, invalid `newStatus`, or a missing/oversized `reason` |
-| `401 Unauthorized` | Missing, malformed, or invalid JWT in the `Authorization` header |
+| `401 Unauthorized` | Missing, malformed, or invalid/expired bearer token |
 | `403 Forbidden` | Authenticated caller lacks a required role |
 | `404 Not Found` | `vehicleId` does not reference an existing, non-deleted vehicle |
 | `409 Conflict` | The requested transition is not allowed from the vehicle's current status |
 
 ## Authentication
 
-Tokens must be signed with HS256 (or higher) using the server's
-`JWT_SECRET` and include a `roles` claim (array of strings) and `sub`
-(the acting user or system account, recorded as `created_by` on every status
-history entry). For local testing you can mint a token with any JWT library
-using the same value configured for `JWT_SECRET`, for example with the
-[jwt.io](https://jwt.io) debugger or a short script using
-`github.com/golang-jwt/jwt/v5`.
+Tokens must be signed with RS256 using the private key matching the
+server's configured `AUTH_JWT_PUBLIC_KEY`/`AUTH_JWT_PUBLIC_KEY_PATH`, and
+include a `roles` claim (array of strings), a `sub` claim (the acting user
+or system account, recorded as `created_by` on every status history entry),
+and match the configured `AUTH_JWT_ISSUER`/`AUTH_JWT_AUDIENCE`. See the root
+[README](../../README.md) for details on generating a key pair and minting
+a token for local testing.
