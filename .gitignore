@@ -24,8 +24,9 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
-.env
+# env file (personal local overrides only; the tracked .env holds
+# non-secret defaults and should stay in the repo)
+.env.local
 
 # Editor/IDE
 # .idea/
