@@ -172,6 +172,34 @@ func TestLoadDatabaseConfigRealEnvVarOverridesFiles(t *testing.T) {
 	}
 }
 
+func TestLoadServerConfigDefaults(t *testing.T) {
+	t.Setenv("SERVER_ADDR", "")
+	t.Setenv("JWT_SECRET", "")
+
+	cfg := LoadServerConfig()
+
+	if cfg.Addr != ":8080" {
+		t.Errorf("cfg.Addr = %q, want %q", cfg.Addr, ":8080")
+	}
+	if cfg.JWTSecret != "" {
+		t.Errorf("cfg.JWTSecret = %q, want empty string", cfg.JWTSecret)
+	}
+}
+
+func TestLoadServerConfigOverrides(t *testing.T) {
+	t.Setenv("SERVER_ADDR", ":9090")
+	t.Setenv("JWT_SECRET", "super-secret-value")
+
+	cfg := LoadServerConfig()
+
+	if cfg.Addr != ":9090" {
+		t.Errorf("cfg.Addr = %q, want %q", cfg.Addr, ":9090")
+	}
+	if cfg.JWTSecret != "super-secret-value" {
+		t.Errorf("cfg.JWTSecret = %q, want %q", cfg.JWTSecret, "super-secret-value")
+	}
+}
+
 func writeEnvFile(t *testing.T, name, contents string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(".", name), []byte(contents), 0o600); err != nil {

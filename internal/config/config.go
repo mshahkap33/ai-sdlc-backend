@@ -100,3 +100,21 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+// ServerConfig holds the settings required to run the REST API server.
+type ServerConfig struct {
+	Addr      string
+	JWTSecret string
+}
+
+// LoadServerConfig reads REST API server settings from environment
+// variables (populated from a .env file when present), applying sensible
+// defaults when a variable is not set.
+func LoadServerConfig() ServerConfig {
+	loadEnvFile()
+
+	return ServerConfig{
+		Addr:      getEnv("SERVER_ADDR", ":8080"),
+		JWTSecret: getEnv("JWT_SECRET", ""),
+	}
+}
