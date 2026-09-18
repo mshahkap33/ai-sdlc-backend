@@ -2,7 +2,7 @@
 
 Backend source code for the car management system, implemented in Go with a
 PostgreSQL database. This repository currently contains the initial database
-schema and the tooling used to apply it.
+schema, the tooling used to apply it, and the Vehicle Onboarding REST API.
 
 ## Technology Stack
 
@@ -15,9 +15,14 @@ schema and the tooling used to apply it.
 
 ```
 cmd/migrate/          CLI entrypoint that applies or rolls back migrations
-internal/config/       Loads database connection settings from environment variables (or a .env file)
+cmd/server/            CLI entrypoint that starts the REST API HTTP server
+internal/config/       Loads database/auth connection settings from environment variables (or a .env file)
 internal/db/           Migration runner built on golang-migrate (Migrate / Rollback)
+internal/auth/         JWT bearer-token authentication and role-based authorization middleware
+internal/vehicle/      Vehicle Onboarding REST API (model, validation, repository, service, handler)
 db/migrations/         Versioned SQL migration files (one table per file, up/down pairs)
+docs/examples/         Sample API usage (e.g. curl requests)
+```
 ```
 
 ## Database Schema
@@ -70,6 +75,17 @@ by git.
 | `DB_NAME` | `ai_sdlc` |
 | `DB_SSLMODE` | `disable` |
 
+The REST API server additionally reads JWT verification settings (see
+`internal/config/config.go`'s `LoadAuthConfig`):
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AUTH_JWT_PUBLIC_KEY` | *(none)* | PEM-encoded RSA public key content used to verify RS256 token signatures |
+| `AUTH_JWT_PUBLIC_KEY_PATH` | *(none)* | Path to a file containing the PEM-encoded RSA public key, used when `AUTH_JWT_PUBLIC_KEY` is not set |
+| `AUTH_JWT_ISSUER` | *(none)* | Expected token `iss` claim |
+| `AUTH_JWT_AUDIENCE` | *(none)* | Expected token `aud` claim |
+| `HTTP_ADDR` | `:8080` | Address the REST API server listens on |
+
 ## Running Migrations
 
 Apply all pending migrations:
@@ -86,6 +102,15 @@ go run ./cmd/migrate -direction down -steps 1
 
 By default the CLI reads migration files from `db/migrations`; override the
 location with `-path` if needed.
+
+## Running the REST API Server
+
+```sh
+go run ./cmd/server
+```
+
+See [`docs/examples`](./docs/examples) for sample API requests, e.g.
+[Create Vehicle](./docs/examples/create-vehicle.md).
 
 ## Testing
 
